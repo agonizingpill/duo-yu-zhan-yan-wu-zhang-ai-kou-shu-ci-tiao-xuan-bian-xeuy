@@ -1,0 +1,72 @@
+name: access-caption-lexicon
+x-runtime: &runtime
+  DATABASE_URL: postgresql://lexicon:${POSTGRES_PASSWORD:-lexicon}@db:5432/lexicon
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: ${JWT_SECRET:-local-floatbridge-lexicon-key-change-before-exposure}
+  DEMO_PASSWORD: ${DEMO_PASSWORD:-StageDesk2026!}
+  SEED_DEMO: ${SEED_DEMO:-true}
+x-backend: &backend
+  build: ./backend
+  environment: *runtime
+  volumes: [artifacts:/app/artifacts]
+  depends_on:
+    db: { condition: service_healthy }
+    redis: { condition: service_healthy }
+services:
+  frontend:
+    container_name: ${COMPOSE_PROJECT_NAME:-access-caption-lexicon}-frontend
+    build: ./frontend
+    ports: ["127.0.0.1:${FRONTEND_PORT:-18302}:80"]
+    depends_on:
+      backend: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, wget, -qO, /dev/null, http://127.0.0.1/healthz]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+  backend:
+    <<: *backend
+    container_name: ${COMPOSE_PROJECT_NAME:-access-caption-lexicon}-backend
+    ports: ["127.0.0.1:${BACKEND_PORT:-19302}:8000"]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  worker:
+    <<: *backend
+    container_name: ${COMPOSE_PROJECT_NAME:-access-caption-lexicon}-worker
+    command: [python, -m, src.worker]
+    healthcheck:
+      test: [CMD, python, -m, src.worker, --check]
+      interval: 2s
+      timeout: 4s
+      retries: 20
+  db:
+    container_name: ${COMPOSE_PROJECT_NAME:-access-caption-lexicon}-db
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: lexicon
+      POSTGRES_USER: lexicon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lexicon}
+    ports: ["127.0.0.1:${DB_PORT:-17802}:5432"]
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD, pg_isready, -U, lexicon, -d, lexicon, -h, 127.0.0.1]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+  redis:
+    container_name: ${COMPOSE_PROJECT_NAME:-access-caption-lexicon}-redis
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, "yes"]
+    volumes: [redis:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  postgres:
+  redis:
+  artifacts:
